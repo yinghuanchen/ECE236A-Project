@@ -136,7 +136,7 @@ class MyClassifier_23:
                 # grab value of weights and biases
                 self.cur_w,self.cur_b = self.W[(self.m_classes[cls1],self.m_classes[cls2])], self.b[(self.m_classes[cls1],self.m_classes[cls2])]
                 # predict binary decision
-                predictions[(cls1,cls2)] = self.f(test_data) # 1 or -1 ?
+                predictions[(self.m_classes[cls1],self.m_classes[cls2])] = self.f(test_data) # 1 or -1 ?
 
         # Code to classify the test_data based on 1-vs-1 classifcations HERE
                 
