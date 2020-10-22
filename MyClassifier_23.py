@@ -54,13 +54,13 @@ class MyClassifier_23:
         self.m_classes = sorted(class_dataset.keys()) # possible classes
         for cls1 in range(len(self.m_classes)-1):
             for cls2 in range(cls1+1,len(self.m_classes)):
-                pair_data_pos = class_dataset[cls1]
-                pair_data_neg = class_dataset[cls2]
+                pair_data_pos = class_dataset[self.m_classes[cls1]]
+                pair_data_neg = class_dataset[self.m_classes[cls2]]
                 pair_data  = np.concatenate((pair_data_pos,pair_data_neg),axis=0)
                 pair_label_pos = np.full(len(pair_data_pos),1)
                 pair_label_neg = np.full(len(pair_data_neg),-1)
                 pair_label = np.concatenate((pair_label_pos,pair_label_neg),axis=0)
-                pairwise_dataset[(cls1,cls2)] = (pair_data,pair_label)
+                pairwise_dataset[(self.m_classes[cls1],self.m_classes[cls2])] = (pair_data,pair_label)
         return pairwise_dataset
         
     def pre_processing(self,p,data,label):
@@ -134,7 +134,7 @@ class MyClassifier_23:
         for cls1 in range(len(self.m_classes)-1):
             for cls2 in range(len(self.m_classes)):
                 # grab value of weights and biases
-                self.cur_w,self.cur_b = self.W[(cls1,cls2)], self.b[(cls1,cls2)]
+                self.cur_w,self.cur_b = self.W[(self.m_classes[cls1],self.m_classes[cls2])], self.b[(self.m_classes[cls1],self.m_classes[cls2])]
                 # predict binary decision
                 predictions[(cls1,cls2)] = self.f(test_data) # 1 or -1 ?
 
