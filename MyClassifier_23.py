@@ -1,6 +1,10 @@
 import pandas as pd
 import numpy as np
 import cvxpy as cp
+import time
+import matplotlib.pyplot as plt
+import itertools
+from itertools import permutations, combinations
 
 class MyClassifier_23:
     
@@ -11,7 +15,7 @@ class MyClassifier_23:
         self.m_size         = 28 # size of Mnist images
         
         self.m_lambdas      = (1e-3,1e-2,1e-1,1,1e1,1e2,1e3)
-        self.m_lambda       = 1 # lambda value for training
+        self.m_lambda       = 1e-3 # lambda value for training
         self.m_kernel_sizes = (2,3,4,5)
         self.m_kernel_size  = 3 # kernel size for pre-processing
         self.m_kernel_types = ('contraharmonic', 'median', 'adaptive')
@@ -62,10 +66,39 @@ class MyClassifier_23:
                 pair_label = np.concatenate((pair_label_pos,pair_label_neg),axis=0)
                 pairwise_dataset[(self.m_classes[cls1],self.m_classes[cls2])] = (pair_data,pair_label)
         return pairwise_dataset
+    
+    def data_load(self,path,num,norm=True):
+        # Inputs:
+        #
+        # path: path of dat csv file
+        # num: a list of picked number such as [1, 7, 8]
+        # norm: normalization to 1. default is True
+        #
+        # Outputs:
+        # train_data: numpy matrix (N_train, M_feature)
+        # train_label: numpy matrix (N_train, 1)
+
+
+        data_csv = pd.read_csv(path).values
+
+        raw_data = np.array(data_csv[:, 1:]).astype(np.float32)
+        raw_label = np.array(data_csv[:, 0]).astype(np.float32)
+
+        index = [i for i in range(len(raw_label)) if (raw_label[i] in num)]
+
+        data = raw_data[index]
+        label = raw_label[index]
+
+        if norm:
+           data = data / 255.0
+
+        print("Loading Data shape: %s" % str(data.shape))
+
+        return data, label
         
     def pre_processing(self,p,data,label):
         # filter the images using kernel
-        trans_data = self.filter_images(p,data)
+        # trans_data = self.filter_images(p,data)
         # split datasets into pairwise dataset
         pairwise_dataset = self.split_dataset(p,data,label)
         return pairwise_dataset
@@ -73,47 +106,93 @@ class MyClassifier_23:
     ########################################################
     #                     Training                         #
     ########################################################
-    def pairwise_train(self,train_data,train_label):
-        w = None
-        b = None
-        # binary classfication training HERE
-        
-        return w,b  # return weights and bias learned
-    
     def train(self, p, train_data, train_label):
-        # active training flag
-        self.m_is_training = True
-        # pre-processing # key: (class1,class2);  value: (data,label)
-        pairwise_dataset = self.pre_processing(p,train_data,train_label)
-        # train for each pair 
-        for pair in pairwise_dataset:
-            tr_dataset = pairwise_dataset[pair]
-            tr_data,tr_label = tr_dataset[0],tr_dataset[1]
-            # run 1-vs-1 training and save the parameters
-            self.W[pair],self.b[pair] = self.pairwise_train(tr_data,tr_label)
-        # deactive training flag
-        self.m_is_training = False
+        # need to be implemented
+        print()
+
+    def train_onevsone(self, train_data, train_label, num_class, lambd):
+        # Inputs:
+        #
+        # train_data: a matrix of dimesions N_train, M_feature
+        # train_label: a vector of length N_train.
+        # num_class: num of class need to be classified
+        # lambd : reg parameter for l1 norm
+        #
+        # Outputs:
+        # weight_vals: list of weight matrix
+        # bias_vals: list of bias matrix
+        # train_error: list of train error for all num combination
+        # Notice:
+        # All combinations and corresponding weight/bias are sorted in increasing order such that (1,2) (1,3) (2,3)
+
+        weight_vals = []
+        bias_vals = []
+        L = num_class * (num_class - 1) // 2
+
+        train_error = np.zeros(L)
+
+        label_all = list(np.unique(train_label))
+        print(label_all)
+        for n, comb in enumerate(itertools.combinations(label_all, 2)):
+            print(comb)
+
+            num1, num2 = comb[0], comb[1]
+            comb_index = [i for i in range(len(train_label)) if (train_label[i] == num1 or train_label[i] == num2)]
+            data_comb = train_data[comb_index]
+            label_comb = train_label[comb_index]
+
+            train_num, feature_size = data_comb.shape[0], data_comb.shape[1]
+
+            x = data_comb
+            y = np.where(label_comb == num1, 1, -1)
+            y = np.reshape(y, (train_num, 1))
+
+            weight = cp.Variable((feature_size, 1))
+            bias = cp.Variable(1)
+            loss = cp.sum(cp.pos(1 - cp.multiply(y, x @ weight + bias)))
+            reg = cp.norm(weight, 1)
+            prob = cp.Problem(cp.Minimize(loss / train_num + lambd * reg))
+
+            prob.solve()
+            train_error[n] = (y != np.sign(x.dot(weight.value) + bias.value)).sum() / train_num
+            print("Training accuracy for combination %s shape: %03f" % (comb, 1 - train_error[n]))
+            weight_vals.append(weight.value)
+            bias_vals.append(bias.value)
+        weights = np.array(weight_vals)
+        weights = np.reshape(weights, [weights.shape[0], weights.shape[1]])
+        bias = np.array(bias_vals)
+        return weights, bias, train_error
 
     ########################################################
     #                     Classfication                    #
     ########################################################
-    def f(self,input):
-        # THIS IS WHERE YOU SHOULD WRITE YOUR CLASSIFICATION FUNCTION
-        #
-        # The inputs of this function are:
-        #
-        # input: the input to the function f(*), equal to g(y) = W^T y + w
-        #
-        # The outputs of this function are:
-        #
-        # s: this should be a scalar equal to the class estimated from
-        # the corresponding input data point, equal to f(W^T y + w)
-        # You should also check if the classifier is trained i.e. self.W and
-        # self.w are nonempty
+    def f(self,weights,bias,test_y):
+        # inputs:
+        # weight: P * N matrix, N is feature number, P is pairwise combinations of classes
+        # bias: P * 1 vector, P is pairwise combinations of classes
+        # test_y: N * 1 vector, N is feature number
+        # outputs:
+        # test_class: class label
+        if weights is [] or bias is []:
+           print('No valid weight files and bias files. Please train first')
+
+        g = weights @ test_y + bias  # g is a P * 1 vector
+        [height, width] = bias.shape
+        classify_vector = np.zeros([height, width])
+        for ii in range(0,g.shape[0]):
+            classify_vector[ii] = np.where(g[ii]>0, 1, -1)
+        combine = list(combinations(list(range(1,(self.K)+1)),2))
+        classify_matrix = np.zeros([self.K,height])
+        for ii in range(0, height):
+            classify_matrix[combine[ii][0]-1][ii] = 1
+            classify_matrix[combine[ii][1]-1][ii] = -1
+        result = list(np.reshape(classify_matrix @ classify_vector,self.K))
+        test_class = result.index(max(result))
+
+        return test_class
         
-        print() #you can erase this line
         
-    def classify(self,test_data):
+    def classify(self,test_data,weights,bias):
         # THIS FUNCTION OUTPUTS ESTIMATED CLASSES FOR A DATA MATRIX
         # 
         # The inputs of this function are:
@@ -121,48 +200,74 @@ class MyClassifier_23:
         # test_data: a matrix of dimesions N_test x M, where N_test
         # is the number of inputs used for training. Each row is an
         # input vector.
-        #
+        # weights: P * N matrix, N is feature number, P is pairwise combinations of classes
+        # bias: P * 1 vector, P is pairwise combinations of classes
         #
         # The outputs of this function are:
         #
         # test_results: this should be a vector of length N_test,
         # containing the estimations of the classes of all the N_test
         # inputs.
-        
-        predictions = {}
-        # binary classification on the test_data and save the predictions
-        for cls1 in range(len(self.m_classes)-1):
-            for cls2 in range(len(self.m_classes)):
-                # grab value of weights and biases
-                self.cur_w,self.cur_b = self.W[(self.m_classes[cls1],self.m_classes[cls2])], self.b[(self.m_classes[cls1],self.m_classes[cls2])]
-                # predict binary decision
-                predictions[(self.m_classes[cls1],self.m_classes[cls2])] = self.f(test_data) # 1 or -1 ?
+        test_number, feature_number = test_data.shape[0], test_data.shape[1]
+        predictions = np.zeros(test_number, int)
+        for ii in range(test_number):
+            processed_data = test_data[ii,:]
+            predictions[ii] = self.f(weights, bias, np.reshape(processed_data.T,[feature_number,1]))
 
-        # Code to classify the test_data based on 1-vs-1 classifcations HERE
-                
-        print() #you can erase this line
+        return predictions
     
     ########################################################
     #                        Testing                       #
     ########################################################
-    def TestCorrupted(self,p,test_data):
-        processed_data = self.filter_images(p,test_data)
-        test_labels =  self.classify(processed_data)
-        return test_labels # vector of length N_Test
+    def TestCorrupted(self,p,test_data,test_label,weights,bias):
+        # The inputs:
+        # self: a reference to the classifier object.
+        # test_data: a matrix of dimesions N_test x M, where N_test
+        # is the number of inputs used for training. Each row is an
+        # input vector.
+        # test_label: N_test * 1 matrix, labels corresponding to test_data
+        # p: erasure propability
+        # weights: P * N matrix, N is feature number, P is pairwise combinations of classes
+        # bias: P * 1 vector, P is pairwise combinations of classes
+        # Outputs:
+        # test_error
 
-    
-# read training dataset
-file = open("./mnist/mnist_train.csv")
-data_train = pd.read_csv(file)
-x_train = np.array(data_train.iloc[:, 1:])
-y_train = np.array(data_train.iloc[:, 0])
-print(np.shape(y_train),np.shape(x_train))
-# read testing dataset
-file = open("./mnist/mnist_test.csv")
-data_test = pd.read_csv(file)
-x_test = np.array(data_test.iloc[:,1:])
-y_test = np.array(data_test.iloc[:, 0])
-print(np.shape(x_test),np.shape(y_test))
+        if weights is [] or bias is []:
+           print('No valid weight files and bias files. Please train first')
+        test_number, feature_number = test_data.shape[0], test_data.shape[1]
+        processed_data = np.zeros([test_number, feature_number])
+        label_all = list(np.unique(train_label))
+        for ii in range(test_number):
+            corrupt_vector = np.ones(feature_number)
+            corrupt_vector[0:int(np.ceil(p*feature_number))] = 0
+            np.random.shuffle(corrupt_vector)
+            test_data[ii,:] = test_data[ii,:] * corrupt_vector
+            # processed_data[ii,:] = self.filter_images(0.6,test_data[ii,:])
+            processed_data[ii,:] = test_data[ii,:]
+        predictions =  self.classify(processed_data,weights,bias)
+        error = 0
+        for jj in range(test_number):
+            y_test = label_all[predictions[jj]]
+            if (y_test != test_label[jj]):
+                error = error+1
+        test_error = error / test_number
+        return 1-test_error # vector of length N_Test
+   
+# Create a model
+model = MyClassifier_23(K=4,M=28*28)
 
-# create a model
-model = MyClassifier_23(K=10,M=28*28)
+# Data loading
+traindatafile =  "mnist_train.csv"
+[train_data, train_label] = model.data_load(traindatafile, [2,3,7,8], True)
+
+testdatafile = "mnist_test.csv"
+[test_data, test_label] = model.data_load(testdatafile, [2,3,7,8], True)
+
+# Data preprocessing
+
+# train
+[weights, bias, train_error] = model.train_onevsone(train_data, train_label, model.K, model.m_lambda)
+
+# test
+test_accuracy = model.TestCorrupted(0.01, test_data, test_label, weights, bias)
+print("Testing accuracy: %03f" % (test_accuracy))
